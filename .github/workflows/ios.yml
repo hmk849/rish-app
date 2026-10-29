@@ -1,0 +1,137 @@
+name: Rish iOS Unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/ios.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    name: Build unsigned iOS IPA
+    runs-on: macos-26
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Inspect Apple build environment
+        run: |
+          set -euo pipefail
+          sw_vers
+          uname -m
+          xcodebuild -version
+          xcodebuild -showsdks
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Verify source checkout
+        run: |
+          set -euo pipefail
+          node scripts/verify-source-checkout.mjs
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.11.0"
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install build utilities
+        run: |
+          set -euo pipefail
+          brew install cmake cocoapods jq
+          brew list --versions cmake cocoapods jq
+
+      - name: Install Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.94.1 --profile minimal
+          rustup default 1.94.1
+          rustup target add aarch64-apple-ios
+          rustup target add aarch64-apple-ios-sim
+          rustc --version
+          cargo --version
+
+      - name: Install JavaScript dependencies
+        run: npm ci --prefix apps/mobile
+
+      - name: Prepare Rish native framework
+        run: ./scripts/prepare-rish-ios.sh
+
+      - name: Prepare Agent Core framework
+        run: ./scripts/prepare-rish-agent-core.sh
+
+      - name: Prepare libgit2 framework
+        run: ./scripts/prepare-libgit2-ios.sh
+
+      - name: Install CocoaPods dependencies
+        working-directory: apps/mobile/ios
+        run: pod install
+
+      - name: Build unsigned iPhone app
+        run: |
+          set -euo pipefail
+
+          xcodebuild \
+            -workspace apps/mobile/ios/Rish.xcworkspace \
+            -scheme Rish \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/RishDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+
+          APP="$RUNNER_TEMP/RishDerivedData/Build/Products/Release-iphoneos/Rish.app"
+          OUT="$RUNNER_TEMP/ipa-output"
+
+          test -d "$APP"
+          test -f "$APP/Info.plist"
+
+          rm -rf "$OUT"
+          mkdir -p "$OUT/Payload"
+          ditto "$APP" "$OUT/Payload/Rish.app"
+
+          echo "Bundle identifier:"
+          /usr/libexec/PlistBuddy \
+            -c 'Print :CFBundleIdentifier' \
+            "$OUT/Payload/Rish.app/Info.plist"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$OUT/Payload" \
+            "$GITHUB_WORKSPACE/Rish-unsigned.ipa"
+
+          test -s "$GITHUB_WORKSPACE/Rish-unsigned.ipa"
+          ls -lh "$GITHUB_WORKSPACE/Rish-unsigned.ipa"
+
+      - name: Upload IPA artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rish-unsigned-IPA
+          path: Rish-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rish-iOS-build-logs
+          path: |
+            ${{ runner.temp }}/RishDerivedData/Logs/
+          if-no-files-found: ignore
+          retention-days: 3
