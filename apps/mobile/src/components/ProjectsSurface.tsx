@@ -110,7 +110,7 @@ function legacyShaped<T extends { schema_version: 2; root: WorkspaceRootRefV1 }>
   const rest = Object.fromEntries(
     Object.entries(value).filter(([key]) => key !== 'root' && key !== 'schema_version'),
   );
-  return { ...rest, schema_version: 1 };
+  return { ...rest, schema_version: 1 } as Omit<T, 'schema_version' | 'root'> & { schema_version: 1 };
 }
 
 export type ProjectReviewPreviewProps = {
