@@ -14,7 +14,7 @@ jobs:
   build-ios:
     # 官方项目要求 Apple Silicon 和特定版本的 Xcode。
     # 如果 runner 没有兼容的工具链，工作流会明确失败。
-    runs-on: macos-26
+    runs-on: macos-15
     timeout-minutes: 180
 
     steps:
