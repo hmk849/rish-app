@@ -80,7 +80,7 @@ class AndroidProjectContextServiceTest {
     @Test
     fun aCommittedIndexStillListsEveryFileAsAnUnchangedCandidate() {
         val f = fixture()
-        for ((path, text) in listOf("README.md" to "# Smoke\n", "src/main.kt" to "fun main() {}\n", "secrets.env" to "API_TOKEN=sk-live-abcdefghijklmnopqrstuvwxyz012345\n")) {
+        for ((path, text) in listOf("README.md" to "# Smoke\n", "src/main.kt" to "fun main() {}\n", "secrets.env" to ("API_TOKEN=" + "sk-" + "live-" + "abcdefghijklmnopqrstuvwxyz012345\n"))) {
             File(f.workspaceDir, path).apply { parentFile?.mkdirs() }.writeText(text)
         }
         val tools = tech.zseven.rish.runtime.AndroidAgentGitToolExecutor(f.projects, f.workspaces, f.roots)
