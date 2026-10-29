@@ -51,12 +51,19 @@ jobs:
       - name: Install Rust toolchain
         run: |
           set -euo pipefail
+          # The pinned native-framework scripts invoke the Rust toolchain as +1.94.
+          # Install that exact rustup alias and its targets, not only 1.94.1.
+          rustup toolchain install 1.94 --profile minimal
           rustup toolchain install 1.94.1 --profile minimal
           rustup default 1.94.1
-          rustup target add aarch64-apple-ios
-          rustup target add aarch64-apple-ios-sim
-          rustc --version
-          cargo --version
+          rustup target add --toolchain 1.94 aarch64-apple-ios
+          rustup target add --toolchain 1.94 aarch64-apple-ios-sim
+          rustup target add --toolchain 1.94.1 aarch64-apple-ios
+          rustup target add --toolchain 1.94.1 aarch64-apple-ios-sim
+          rustc +1.94 --version
+          cargo +1.94 --version
+          rustc +1.94.1 --version
+          cargo +1.94.1 --version
 
       - name: Install JavaScript dependencies
         run: npm ci --prefix apps/mobile
