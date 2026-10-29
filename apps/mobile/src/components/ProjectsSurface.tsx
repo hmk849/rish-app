@@ -98,15 +98,18 @@ function legacyRow(project: LocalProject): ProjectRow {
 
 /** The row as the callers outside this surface know a project: without the row's own fields. */
 function projectOf(row: ProjectRow): LocalProject {
-  const { root: _root, workspaceName: _workspaceName, ...project } = row;
-  return project;
+  return Object.fromEntries(
+    Object.entries(row).filter(([key]) => key !== 'root' && key !== 'workspaceName'),
+  ) as LocalProject;
 }
 
 /** A V2 answer in the v1 shape the panel renders; the root is the row's. */
 function legacyShaped<T extends { schema_version: 2; root: WorkspaceRootRefV1 }>(
   value: T,
 ): Omit<T, 'schema_version' | 'root'> & { schema_version: 1 } {
-  const { root: _root, schema_version: _version, ...rest } = value;
+  const rest = Object.fromEntries(
+    Object.entries(value).filter(([key]) => key !== 'root' && key !== 'schema_version'),
+  );
   return { ...rest, schema_version: 1 };
 }
 
@@ -910,6 +913,7 @@ export function ProjectsSurface({
       beginTask,
       cloneUrl,
       finishTask,
+      locale,
       name,
       preferences.gitHttpsProxyUrl,
       selectView,
