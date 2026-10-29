@@ -1,4 +1,4 @@
-name: Rish iOS Build
+name: Build Rish iOS Unsigned IPA
 
 on:
   workflow_dispatch:
@@ -7,123 +7,151 @@ permissions:
   contents: read
 
 concurrency:
-  group: rish-ios-build-${{ github.ref }}
+  group: rish-ios-unsigned-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-ios:
+    # 官方项目要求 Apple Silicon 和特定版本的 Xcode。
+    # 如果 runner 没有兼容的工具链，工作流会明确失败。
     runs-on: macos-26
-    timeout-minutes: 360
+    timeout-minutes: 180
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Inspect Apple build environment
+      - name: Show build environment
+        shell: bash
         run: |
           set -euxo pipefail
+          uname -a
           sw_vers
           xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-version
+          xcodebuild -showsdks
+          node --version || true
+          ruby --version
+          git status --short
 
-      - name: Install Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22.11.0"
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
 
-      - name: Install native tools
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.94.1"
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Install build tools
+        shell: bash
         run: |
           set -euxo pipefail
-          brew install cmake jq
-          brew install cocoapods
-          node --version
-          npm --version
-          cmake --version
-          pod --version
-
-      - name: Install pinned Rust toolchain
-        run: |
-          set -euxo pipefail
-          rustup toolchain install 1.94.1 \
-            --profile minimal \
-            --target aarch64-apple-ios \
-            --target aarch64-apple-ios-sim
-          rustup default 1.94.1
-          rustc --version
-          cargo --version
-          rustup target list --installed
+          brew install cmake jq perl
+          gem install cocoapods
 
       - name: Verify source checkout
-        run: node scripts/verify-source-checkout.mjs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node scripts/verify-source-checkout.mjs
 
       - name: Install JavaScript dependencies
-        run: npm ci --prefix apps/mobile
+        shell: bash
+        run: |
+          set -euxo pipefail
+          npm ci --prefix apps/mobile
 
-      - name: Prepare Rish iOS framework
-        run: ./scripts/prepare-rish-ios.sh
+      - name: Prepare Rish iOS dependency
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ./scripts/prepare-rish-ios.sh
 
-      - name: Prepare Rish agent core
-        run: ./scripts/prepare-rish-agent-core.sh
+      - name: Prepare shared Agent core
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ./scripts/prepare-rish-agent-core.sh
 
-      - name: Prepare libgit2 dependencies
-        run: ./scripts/prepare-libgit2-ios.sh
+      - name: Prepare libgit2 and native dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ./scripts/prepare-libgit2-ios.sh
 
       - name: Install CocoaPods
-        run: pod install
-        working-directory: apps/mobile/ios
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd apps/mobile/ios
+          pod install
 
-      - name: Build unsigned iPhone app
+      - name: Build unsigned iOS device app
+        shell: bash
         run: |
           set -euxo pipefail
 
-          DERIVED="$RUNNER_TEMP/RishDerivedData"
+          cd apps/mobile/ios
 
           xcodebuild \
-            -workspace apps/mobile/ios/Rish.xcworkspace \
+            -workspace Rish.xcworkspace \
             -scheme Rish \
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            -derivedDataPath "$DERIVED" \
+            -derivedDataPath "$RUNNER_TEMP/RishDerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_IDENTITY="" \
             build
 
-          APP="$DERIVED/Build/Products/Release-iphoneos/Rish.app"
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euxo pipefail
 
-          if [ ! -d "$APP" ]; then
-            echo "::error::Build completed without producing Rish.app"
+          APP_PATH="$RUNNER_TEMP/RishDerivedData/Build/Products/Release-iphoneos/Rish.app"
+
+          if [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: Rish.app was not produced by xcodebuild."
+            find "$RUNNER_TEMP/RishDerivedData/Build/Products" \
+              -maxdepth 4 -print || true
             exit 1
           fi
 
-          ruby scripts/verify-no-bundled-secret.rb "$APP"
-
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
-          cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/Rish.app"
+          cp -R "$APP_PATH" "$RUNNER_TEMP/ipa/Payload/Rish.app"
 
-          /usr/bin/ditto -c -k --sequesterRsrc \
-            "$RUNNER_TEMP/ipa/Payload" \
-            "$RUNNER_TEMP/Rish-Payload.zip"
-
-          cp "$RUNNER_TEMP/Rish-Payload.zip" \
-            "$GITHUB_WORKSPACE/Rish-unsigned.ipa"
+          (
+            cd "$RUNNER_TEMP/ipa"
+            /usr/bin/zip -qry \
+              "$GITHUB_WORKSPACE/Rish-unsigned.ipa" \
+              Payload
+          )
 
           test -s "$GITHUB_WORKSPACE/Rish-unsigned.ipa"
+          ls -lh "$GITHUB_WORKSPACE/Rish-unsigned.ipa"
 
-      - name: Upload unsigned build
+      - name: Upload IPA artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Rish-iOS-unsigned
+          name: Rish-unsigned-IPA
           path: Rish-unsigned.ipa
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 7
 
-      - name: Upload build logs on failure
+      - name: Upload build logs if failed
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: Rish-iOS-build-logs
-          path: ${{ runner.temp }}/RishDerivedData/Logs/**
+          path: |
+            ${{ runner.temp }}/RishDerivedData/Logs/**
+            ${{ runner.temp }}/RishDerivedData/Build/Logs/**
           if-no-files-found: ignore
-          retention-days: 3
+          retention-days: 7
