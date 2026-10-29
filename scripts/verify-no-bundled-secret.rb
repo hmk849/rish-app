@@ -53,6 +53,8 @@ synthetic_exact = Set.new([
   "ghp_#{'0' * 24}",
   'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890',
   "sk-test_#{'0' * 24}",
+  # Exact synthetic Android test fixture retained in historical Git blobs.
+  ("sk-" + "live-" + "abcdefghijklmnopqrstuvwxyz012345"),
 ])
 non_secret_exact = Set.new([
   'sk-ecdsa-sha2-nistp256-cert-v01',
